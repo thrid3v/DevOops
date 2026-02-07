@@ -9,7 +9,7 @@ from datetime import datetime
 
 # --- IMPORT BACKEND ---
 try:
-    from predictor import get_prediction
+    from predictor import get_prediction, generate_clinical_summary, calculate_current_accuracy
     from db import init_db, save_result, get_history
 except ImportError as e:
     st.error(f"❌ CRITICAL ERROR: {e}")
@@ -23,21 +23,22 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Initialize Database on Startup
 if "db_init" not in st.session_state:
     init_db()
     st.session_state["db_init"] = True
+
+current_accuracy = calculate_current_accuracy()
 
 # Custom CSS for "Medical" Look
 st.markdown("""
     <style>
         .block-container {padding-top: 2rem;}
         div[data-testid="stMetricValue"] {font-size: 24px;}
-        .big-font {font-size:20px !important; color: #555;}
+        .report-box {background-color: white; color: black; padding: 15px; border-left: 5px solid #ff4b4b; border-radius: 5px; margin-bottom: 20px;}
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. SIDEBAR (PATIENT CONTEXT) ---
+# --- 2. SIDEBAR ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3063/3063823.png", width=80)
     st.title("NeuroSentinel")
@@ -45,24 +46,22 @@ with st.sidebar:
     st.markdown("---")
     
     st.header("👤 Patient Profile")
-    # Patient ID controls the DB context
     patient_id = st.text_input("Patient ID / MRN", value="PT-8492-X")
-    
     st.info(f"Active Session: {patient_id}")
     st.markdown("---")
     
-    with st.expander("ℹ️ Biomarker Guide"):
-        st.markdown("""
-        **1. Pause Rate:** % of time spent in silence. >0.4 indicates hesitation.
-        **2. Vocab Richness:** Diversity of unique words (Type-Token Ratio).
-        **3. Fluency:** Words per minute (normalized).
-        """)
+    if st.button("Reset Live Trial Stats"):
+        st.session_state.session_correct = 0
+        st.session_state.session_total = 0
+        st.rerun()
+    
+    st.subheader("📊 System Benchmarks")
+    st.metric("Live Dataset Accuracy", f"{current_accuracy}%", delta="Real-time")
 
 # --- 3. MAIN APP LAYOUT ---
 st.title("🧠 Cognitive Assessment Dashboard")
 st.markdown(f"**Patient:** `{patient_id}` | **Date:** `{datetime.now().strftime('%Y-%m-%d')}`")
 
-# Tabs for Logical Flow
 tab1, tab2 = st.tabs(["🎙️ New Assessment", "📈 Clinical History"])
 
 # ==========================================
@@ -73,170 +72,114 @@ with tab1:
 
     with col_left:
         st.subheader("1. Voice Sample Acquisition")
-        st.markdown("Ask patient to describe the 'Cookie Theft' image or their morning routine.")
+        st.markdown("Ask patient to describe the 'Cookie Theft' image.")
         
-        # --- AUDIO INPUT ---
-        audio_value = st.audio_input("Start Recording")
+        audio_input = st.audio_input("Start Recording")
 
-        if audio_value:
-            st.audio(audio_value, format="audio/wav")
-            
-            # Save temp file
+        if audio_input:
+            st.audio(audio_input, format="audio/wav")
             with open("temp_input.wav", "wb") as f:
-                f.write(audio_value.getvalue())
+                f.write(audio_input.getvalue())
             
-            # --- ACTION BUTTON ---
             if st.button("Run Analysis", type="primary"):
-                with st.spinner("Processing Neurological Markers (Vosk Engine)..."):
-                    time.sleep(1) # UX Delay
-                    
-                    # CALL THE AI
+                with st.spinner("Extracting 9 Neurological Biomarkers..."):
                     label, confidence, data = get_prediction("temp_input.wav")
                     
-                    # SAVE TO DB
-                    save_result(
-                        patient_id, 
-                        label, 
-                        confidence, 
-                        data['pause_rate'][0], 
-                        data['vocab_richness'][0]
-                    )
-                    st.success("Analysis Complete & Saved to Database.")
-                    
-                    # --- NEW CODE: GENERATE PDF ---
-                    report_path = generate_pdf(
-                        patient_id, 
-                        {"pause_rate": data['pause_rate'][0], "vocab_richness": data['vocab_richness'][0], "word_count": data['word_count'][0]},
-                        label
-                    )
-                    
-                    with open(report_path, "rb") as pdf_file:
-                        pdf_bytes = pdf_file.read()
+                    if data is not None:
+                        save_result(patient_id, label, confidence, 
+                                    data['pause_rate'][0], data['vocab_richness'][0])
                         
-                    st.download_button(
-                        label="📄 Download Clinical Report (PDF)",
-                        data=pdf_bytes,
-                        file_name=f"NeuroSentinel_Report_{patient_id}.pdf",
-                        mime="application/pdf"
-                    )
-                    
-                    # STORE IN SESSION STATE (To persist across re-runs)
-                    st.session_state['last_result'] = {
-                        "label": label,
-                        "conf": confidence,
-                        "data": data
-                    }
-                    st.success("Analysis Complete & Saved to Database.")
+                        report_path = generate_pdf(
+                            patient_id, 
+                            {"pause_rate": data['pause_rate'][0], 
+                             "vocab_richness": data['vocab_richness'][0], 
+                             "word_count": data['word_count'][0]},
+                            label
+                        )
+                        
+                        st.session_state['last_result'] = {
+                            "label": label, "conf": confidence, "data": data,
+                            "summary": generate_clinical_summary(data),
+                            "report_path": report_path
+                        }
 
-    # --- RESULTS DISPLAY ---
     with col_right:
         st.subheader("2. Diagnostic Insights")
         
         if 'last_result' in st.session_state:
             res = st.session_state['last_result']
-            data = res['data']
-            label = res['label']
+            data, label = res['data'], res['label']
             
-            # 1. TOP LEVEL ALERT
+            # --- Result Alert ---
             if "Decline" in label:
-                st.error(f"🚨 RESULT: {label.upper()} (Confidence: {res['conf']*100:.1f}%)")
+                st.error(f"🚨 RESULT: {label.upper()} (Confidence: {res['conf']:.1f}%)")
             else:
-                st.success(f"✅ RESULT: {label.upper()} (Confidence: {res['conf']*100:.1f}%)")
+                st.success(f"✅ RESULT: {label.upper()} (Confidence: {res['conf']:.1f}%)")
             
-            # 2. KEY METRICS ROW
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Pause Rate", f"{data['pause_rate'][0]:.2f}", delta="-0.05" if data['pause_rate'][0] < 0.3 else "+0.12", delta_color="inverse")
-            m2.metric("Vocab Richness", f"{data['vocab_richness'][0]:.2f}", delta="Normal")
-            m3.metric("Word Count", f"{data['word_count'][0]}")
+            # --- Clinical Reasoning ---
+            st.markdown(f"""<div class="report-box"><strong>Clinical Observations:</strong><br>{res['summary']}</div>""", unsafe_allow_html=True)
 
-            # 3. RADAR CHART (The "Wow" Visualization)
-            st.markdown("##### 🧠 Neurological Fingerprint")
+            # --- [UPDATED] METRICS ROW WITH TRIAL ACCURACY ---
+            st.markdown("##### 🧪 Performance & Metrics")
+            m_c1, m_c2, m_c3, m_c4 = st.columns(4)
             
-            # Normalize for chart (0-100)
-            vocab_score = min(data['vocab_richness'][0] * 120, 100) # Scale up TTR
-            fluency_score = max(0, (1.0 - data['pause_rate'][0]) * 100) # Invert Pause Rate
+            m_c1.metric("Pause Rate", f"{data['pause_rate'][0]:.2f}", 
+                        delta="Risk" if data['pause_rate'][0] > 0.4 else "Normal", delta_color="inverse")
+            m_c2.metric("Vocab", f"{data['vocab_richness'][0]:.2f}")
+            m_c3.metric("Speech Rate", f"{data['speech_rate'][0]:.1f} wps")
             
-            categories = ['Vocabulary', 'Fluency', 'Speech Rate', 'Complexity']
+            # Calculate Trial Accuracy live
+            correct = st.session_state.get('session_correct', 0)
+            total = st.session_state.get('session_total', 0)
+            trial_acc = (correct / total * 100) if total > 0 else 0.0
+            m_c4.metric("Trial Accuracy", f"{trial_acc:.1f}%", delta=f"{total} Tests")
+
+            # --- ACTIONS & PDF ---
+            st.markdown("---")
+            st.caption("👨‍⚕️ Judge's Verdict: Confirm diagnosis to update live session stats.")
+            v1, v2, v3 = st.columns([1, 1, 1.5])
+            with v1:
+                if st.button("✅ Confirm Correct"):
+                    st.session_state.session_correct = st.session_state.get('session_correct', 0) + 1
+                    st.session_state.session_total = st.session_state.get('session_total', 0) + 1
+                    st.rerun()
+            with v2:
+                if st.button("❌ Mark Incorrect"):
+                    st.session_state.session_total = st.session_state.get('session_total', 0) + 1
+                    st.rerun()
+            with v3:
+                if os.path.exists(res['report_path']):
+                    with open(res['report_path'], "rb") as f:
+                        st.download_button("📄 Download PDF Report", f, 
+                                         file_name=f"NeuroSentinel_{patient_id}.pdf")
+
+            # --- Radar Chart ---
+            st.markdown("##### 🧠 9-Parameter Neurological Fingerprint")
+            categories = ['Pause Rate', 'Vocab', 'Texture', 'Brightness', 'Delta', 'Emotional Range', 'Speech Rate', 'Latency', 'Count']
+            r_vals = [(1-data['pause_rate'][0])*100, data['vocab_richness'][0]*100, abs(data['acoustic_texture'][0]), 
+                      (data['speech_brightness'][0]/4000)*100, abs(data['mfcc_delta'][0])*500, (data['emotional_range'][0]/5000)*100,
+                      (data['speech_rate'][0]/3)*100, (1/max(1, data['initial_latency'][0]))*100, min(data['word_count'][0], 100)]
+
             fig = go.Figure()
-
-            # Healthy Baseline (Fixed)
-            fig.add_trace(go.Scatterpolar(
-                r=[85, 90, 80, 85],
-                theta=categories,
-                fill='toself',
-                name='Healthy Baseline',
-                line_color='green',
-                opacity=0.4
-            ))
-
-            # Patient Data
-            fig.add_trace(go.Scatterpolar(
-                r=[vocab_score, fluency_score, 70, vocab_score*0.9],
-                theta=categories,
-                fill='toself',
-                name='Patient Scan',
-                line_color='red' if "Decline" in label else 'blue'
-            ))
-
-            fig.update_layout(
-                polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-                showlegend=True,
-                height=350,
-                margin=dict(l=40, r=40, t=20, b=20)
-            )
+            fig.add_trace(go.Scatterpolar(r=r_vals, theta=categories, fill='toself', name='Patient Scan', line_color='red' if "Decline" in label else 'blue'))
+            fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), height=400, margin=dict(l=50, r=50, t=20, b=20))
             st.plotly_chart(fig, use_container_width=True)
-
         else:
-            st.info("👈 Please record audio and click 'Run Analysis' to see results.")
+            st.info("👈 Record audio and click 'Run Analysis' to see results.")
 
 # ==========================================
-# TAB 2: LONGITUDINAL HISTORY (The Graph)
+# TAB 2: HISTORY
 # ==========================================
 with tab2:
     st.subheader(f"History for {patient_id}")
-    
-    # 1. FETCH DATA
-    history_df = get_history(patient_id)
-    
-    if not history_df.empty:
-        # 2. TREND CHART (Pause Rate is the best indicator of decline)
-        st.markdown("##### 📉 Cognitive Trajectory (Pause Rate)")
-        st.caption("Lower is better. Sharp increases indicate rapid decline.")
-        
-        # Sort by date just in case
-        history_df = history_df.sort_values(by="timestamp")
-        
-        fig_trend = px.line(
-            history_df, 
-            x='timestamp', 
-            y='pause_rate', 
-            markers=True,
-            title="Pause Rate Over Time",
-            labels={'pause_rate': 'Pause Duration Ratio', 'timestamp': 'Assessment Date'}
-        )
-        
-        # Add a "Risk Threshold" Line
-        fig_trend.add_hline(y=0.40, line_dash="dash", line_color="red", annotation_text="Clinical Threshold (0.40)")
-        fig_trend.update_layout(height=350)
-        
-        st.plotly_chart(fig_trend, use_container_width=True)
-
-        # 3. DATA TABLE
-        with st.expander("📄 View Raw Clinical Data"):
-            st.dataframe(history_df.style.highlight_max(axis=0, color="#fffdc9"))
-            
-            # Download Button
-            csv = history_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                "📥 Download Report (CSV)",
-                csv,
-                f"report_{patient_id}.csv",
-                "text/csv"
-            )
-            
+    h_df = get_history(patient_id)
+    if not h_df.empty:
+        fig_t = px.line(h_df, x='timestamp', y='pause_rate', markers=True, title="Pause Rate Trajectory")
+        fig_t.add_hline(y=0.40, line_dash="dash", line_color="red", annotation_text="Risk Threshold")
+        st.plotly_chart(fig_t, use_container_width=True)
+        st.dataframe(h_df)
     else:
-        st.warning("No historical records found for this patient ID. Run a new assessment in Tab 1.")
+        st.warning("No historical records found.")
 
-# --- FOOTER ---
 st.markdown("---")
-st.caption("🔒 NeuroSentinel processes all data locally (Edge AI). No audio leaves this device.")
+st.caption(f"🔒 NeuroSentinel Edge AI | System-Wide Accuracy: {current_accuracy}%")
