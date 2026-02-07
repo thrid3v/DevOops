@@ -4,9 +4,12 @@ pause_rate,vocab_richness,word_count,label,filename
 0.058,0.909,22,0,healthy_03.wav
 0.078,0.944,18,0,healthy_04.wav
 0.034,0.806,36,0,healthy_05.wav
+0.075,0.931,29,0,healthy_06.wav
+0.042,0.885,26,0,healthy_07.wav
 0.372,0.867,15,1,mild_01.wav
-0.528,0.81,21,1,mild_02.wav
-0.462,0.737,19,2,moderate_01.wav
-0.41,0.682,22,2,moderate_02.wav
-0.534,0.857,21,3,severe_01.wav
-0.663,0.929,14,3,severe_02.wav
+0.525,0.81,21,1,mild_02.wav
+0.461,0.684,19,2,moderate_01.wav
+0.409,0.682,22,2,moderate_02.wav
+0.533,0.857,21,3,severe_01.wav
+0.664,0.929,14,3,severe_02.wav
+0.546,1.0,7,3,severe_03.wav
