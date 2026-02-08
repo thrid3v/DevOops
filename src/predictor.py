@@ -8,10 +8,10 @@ import librosa
 from vosk import Model, KaldiRecognizer
 
 # --- CONFIG ---
-VOSK_PATH = "models/vosk-model-small-en-us-0.15"
-MODEL_PATH = "models/neuro_model.pkl"
-SCALER_PATH = "models/scaler.pkl"
-DATASET_PATH = "data/dataset.csv" # Required for baseline comparison
+VOSK_PATH = "../models/vosk-model-small-en-us-0.15"
+MODEL_PATH = "../models/neuro_model.pkl"
+SCALER_PATH = "../models/scaler.pkl"
+DATASET_PATH = "../data/dataset.csv" # Required for baseline comparison
 
 # 1. LOAD MODELS
 print("⏳ Loading AI Pipeline...")

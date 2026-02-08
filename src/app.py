@@ -77,13 +77,19 @@ st.markdown("""
 
 # --- 2. SIDEBAR ---
 with st.sidebar:
-    st.image("./brain.png", width=80)
+    st.image("../brain.png", width=80)
     st.title("NeuroSentinel")
     st.caption("v1.2 (Clinical Research Build)")
     st.markdown("---")
     
     st.header("👤 Patient Profile")
-    patient_id = st.text_input("Patient ID / MRN", value="PT-8492-X")
+    
+    # Generate unique patient ID on first load
+    if "patient_id" not in st.session_state:
+        import random
+        st.session_state.patient_id = f"PT-{random.randint(1000, 9999)}-{random.choice(['A', 'B', 'C', 'D', 'E', 'F', 'X', 'Y', 'Z'])}"
+    
+    patient_id = st.text_input("Patient ID / MRN", value=st.session_state.patient_id)
     st.info(f"Active Session: {patient_id}")
     st.markdown("---")
     
